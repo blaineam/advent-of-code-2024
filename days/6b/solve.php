@@ -3,18 +3,19 @@ $input = file_get_contents(__DIR__.DIRECTORY_SEPARATOR."input.txt");
 $map = array_map(function($row) {
 	return str_split($row);
 }, explode(PHP_EOL, trim($input)));
+$originalMap = $map;
 function resetMap() {
 	global $map;
+	global $originalMap;
 	global $input;
-	$map = array_map(function($row) {
-		return str_split($row);
-	}, explode(PHP_EOL, trim($input)));
+	$map = $originalMap;
 }
 $currentObstacle = [];
 $loopCheck = 0;
 $foundObstacles = [];
 $guardMovements = [];
-$loops = 0;
+$loops = [];
+$originalGuardLocation = findGuard($originalMap);
 $update = updateFrame(true, true);
 while($update[0] && !$update[1] ) {
 	$update = updateFrame(false, true);
@@ -22,7 +23,7 @@ while($update[0] && !$update[1] ) {
 resetMap();
 $total = count($guardMovements);
 $iteration = $total;
-
+$starttime = microtime(true);
 function printMap($map, $reset = true) {
 	if ($reset) {
 		for($i = 0; $i < count($map) + 1; $i++) {
@@ -50,13 +51,26 @@ function printMap($map, $reset = true) {
 		}
 		echo PHP_EOL;
 	}
+	usleep(1000);
 }
 function printProgress($iteration) {
 	global $input;
 	global $total;
-	$percent = round((($total - $iteration) / $total) * 10000) / 100;
-	//echo "\r\033[K\033[1A\r\033[K\r";
-	echo PHP_EOL."Overall Progress: {$iteration}/{$total} ({$percent})"; 
+	global $loops;
+	global $starttime;
+	if ($iteration % 50 === 0) {
+		$endtime = microtime(true);
+		$s = $endtime - $starttime;
+		$h = floor($s / 3600);
+		$s -= $h * 3600;
+		$m = floor($s / 60);
+		$s -= $m * 60;
+		$hrt = $h.':'.sprintf('%02d', $m).':'.sprintf('%02d', $s);
+		$percent = round((($total - $iteration) / $total) * 10000) / 100;
+		$loopCount = count($loops);
+		//echo "\r\033[K\033[1A\r\033[K\r";
+		echo PHP_EOL."{$hrt} ||| Overall Progress: {$iteration}/{$total} ({$percent}) = [{$loopCount}]"; 
+	}
 }
 function countPatrolMovements($map) {
 	$patrols = 0;
@@ -84,28 +98,40 @@ function findGuard($map) {
 	$obstacle = [];
 	foreach($map as $row => $columns) {
 		foreach($columns as $column => $entity) {
-			if (in_array($entity, ['^','>','v', '<'])) {
-				$obstacle = [$row, $column];
+			$guardOrientations = ['^','>','v', '<'];
+			if (in_array($entity, $guardOrientations)) {
+				$currentOrientation = array_search($entity, $guardOrientations);
+				$obstacle = [$guardOrientations[$currentOrientation], $row, $column];
 			}
 		}
 	}
 	return $obstacle;
 }
-$originalGuardPosition = findGuard($map);
-function updateObstacle() {
+function updateObstacle($absolute = false) {
 	global $map;
-	global $currentObstacle;
 	global $guardMovements;
 	global $iteration;
-	$chunk = array_slice($guardMovements, $iteration - 1, 1);
+	global $originalGuardLocation;
+	if ($iteration < 0) {
+		return false;
+	}
+	$chunk = array_slice($guardMovements, $iteration, 1);
 	$pos = end($chunk);
-	$map[$pos[1]][$pos[2]] = 'O';
+	if ($originalGuardLocation === $pos) {
+		return false;
+	}
+	if (!$absolute && $pos === false) {
+		return false;
+	}
+	
+	if ($pos !== false) {
+		$map[$pos[1]][$pos[2]] = 'O';
+	}
+	
 	return true;
 }
 function updateFrame($first = false, $absolute = false) {
 	global $map;
-	global $loopCheck;
-	global $originalGuardPosition;
 	global $foundObstacles;
 	global $guardMovements;
 	if ($first) {
@@ -114,14 +140,14 @@ function updateFrame($first = false, $absolute = false) {
 			$guardMovements = [];
 		}
 	}
-	$guard = [];
-	$obstacles = [];
 	$guardOrientations = ['^','>','v', '<'];
 	$patrolling = true;
 	$looped = false;
+	$guardExists = false;
 	foreach($map as $row => $columns) {
 		foreach($columns as $column => $entity) {
 			if (in_array($entity, $guardOrientations)) {
+				$guardExists = true;
 				$currentOrientation = array_search($entity, $guardOrientations);
 				$nextOriention = $currentOrientation + 1;
 				if ($nextOriention >= count($guardOrientations)) {
@@ -130,26 +156,21 @@ function updateFrame($first = false, $absolute = false) {
 				$headedEntity = false;
 				$headedRow = $row;
 				$headedColumn = $column;
-				$doubleEntity = false;
 				switch($currentOrientation) {
 					case 0:
 						$headedEntity = $map[$row - 1][$column] ?? false;
-						$doubleEntity = $map[$row - 2][$column] ?? false;
 						$headedRow = $row - 1;
 						break;
 					case 1:
 						$headedEntity = $map[$row][$column + 1] ?? false;
-						$doubleEntity = $map[$row][$column + 2] ?? false;
 						$headedColumn = $column + 1;
 						break;
 					case 2:
 						$headedEntity = $map[$row + 1][$column] ?? false;
-						$doubleEntity = $map[$row + 2][$column] ?? false;
 						$headedRow = $row + 1;
 						break;
 					case 3:
 						$headedEntity = $map[$row][$column - 1] ?? false;
-						$doubleEntity = $map[$row][$column - 2] ?? false;
 						$headedColumn = $column - 1;
 						break;
 					default:
@@ -169,16 +190,15 @@ function updateFrame($first = false, $absolute = false) {
 					}
 					$map[$headedRow][$headedColumn] = $guardOrientations[$currentOrientation];
 				}
-			}
-			if ($entity === '#') {
-				$obstacles[] = [$row, $column];
+				break 2;
 			}
 		}
 	}
 	//printMap($map, true);
-	return [$patrolling, $looped];
+	return [$guardExists && $patrolling, $guardExists && $looped];
 }
-while (updateObstacle() && $iteration >= 0) {
+$newObstacle = updateObstacle(true);
+while ($newObstacle && $iteration >= 0) {
 	$update = updateFrame(true);
 	while($update[0] && !$update[1] ) {
 		$update = updateFrame();
@@ -186,13 +206,16 @@ while (updateObstacle() && $iteration >= 0) {
 	if ($update[1]) {
 		//echo PHP_EOL."Looped".PHP_EOL;
 		//printMap($map, false);
-		$loops++;
-		echo PHP_EOL."Loop Count: {$loops}".PHP_EOL;
+		$pos = findAdditionalObstacle($map);
+		$loops["{$pos[0]}-{$pos[1]}"] = 1;
+		//$loopCount = count($loops);
+		//echo PHP_EOL."Loop Count: {$loopCount}".PHP_EOL;
 	}
-	$currentObstacle = findAdditionalObstacle($map);
+	// $currentObstacle = findAdditionalObstacle($map);
 	resetMap();
 	$iteration--;
 	printProgress($iteration);
+	$newObstacle = updateObstacle();
 }
 
-echo PHP_EOL.$loops;
+echo PHP_EOL.count($loops);

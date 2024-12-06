@@ -1,5 +1,6 @@
 <?php
 $input = file_get_contents(__DIR__.DIRECTORY_SEPARATOR."input.txt");
+if ($argc > 1) parse_str(implode('&', array_slice($argv, 1)), $_GET);
 $map = array_map(function($row) {
 	return str_split($row);
 }, explode(PHP_EOL, trim($input)));
@@ -51,7 +52,7 @@ function printMap($map, $reset = true) {
 		}
 		echo PHP_EOL;
 	}
-	usleep(1000);
+	//usleep(1000);
 }
 function printProgress($iteration) {
 	global $input;
@@ -112,9 +113,11 @@ function updateObstacle($absolute = false) {
 	global $guardMovements;
 	global $iteration;
 	global $originalGuardLocation;
+	global $total;
 	if ($iteration < 0) {
 		return false;
 	}
+	
 	$chunk = array_slice($guardMovements, $iteration, 1);
 	$pos = end($chunk);
 	if ($originalGuardLocation === $pos) {
@@ -199,6 +202,20 @@ function updateFrame($first = false, $absolute = false) {
 }
 $newObstacle = updateObstacle(true);
 while ($newObstacle && $iteration >= 0) {
+	if (isset($_GET['offset'])) {
+		$min = $total - (int) $_GET["offset"];
+		$max = max($min - 500, 0);
+		//echo PHP_EOL."Checking Range: {$min} - {$iteration} - {$max}";
+		if ($iteration <= $max || $iteration > $min) {
+			resetMap();
+			$iteration--;
+			$newObstacle = updateObstacle();
+			continue;
+		} else {
+			//echo PHP_EOL."In Range: {$min} - {$iteration} - {$max}";
+		}
+	}
+	
 	$update = updateFrame(true);
 	while($update[0] && !$update[1] ) {
 		$update = updateFrame();
@@ -214,7 +231,7 @@ while ($newObstacle && $iteration >= 0) {
 	// $currentObstacle = findAdditionalObstacle($map);
 	resetMap();
 	$iteration--;
-	printProgress($iteration);
+	//printProgress($iteration);
 	$newObstacle = updateObstacle();
 }
 
